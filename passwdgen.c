@@ -18,7 +18,8 @@ static void show_usage() {
          "--seed0=<number>,\n"
          "--seed1=<number> \tUse this number as seed of generator.\n"
          "--without-header \tDont print header info.\n"
-         "-h, --help\tShow help\n",
+         "-h, --help\tShow help\n"
+         "-v, --version\tShow version\n",
          PASSWDGEN_VERSION_MAJOR, PASSWDGEN_VERSION_MINOR,
          PASSWDGEN_VERSION_PATCH);
 }
@@ -62,6 +63,7 @@ static struct option long_options[] = {{"len", 1, 0, 'l'},
                                        {"alphabet", 1, 0, 'a'},
                                        {"human-readable", 0, 0, 'r'},
                                        {"help", 0, 0, 'h'},
+                                       {"version", 0, 0, 'v'},
                                        {"seed0", 1, 0, '0'},
                                        {"seed1", 1, 0, '1'},
                                        {"without-header", 0, 0, 'w'},
@@ -86,6 +88,7 @@ struct opts {
 };
 
 #define OPT_NEED_HELP 1
+#define OPT_NEED_VERSION 3
 #define OPT_ERR 2
 
 int init_opts(int argc, char **argv, struct opts *opts) {
@@ -98,7 +101,7 @@ int init_opts(int argc, char **argv, struct opts *opts) {
   opts->flags = 0;
   strcpy(opts->alphabet, DEFAULT_ALPHABET);
   while (1) {
-    rc = getopt_long(argc, argv, "l:c:a:h0:1:w", long_options, &opt_index);
+    rc = getopt_long(argc, argv, "l:c:a:hv0:1:w", long_options, &opt_index);
     if (rc < 0)
       return 0;
     switch (rc) {
@@ -113,6 +116,8 @@ int init_opts(int argc, char **argv, struct opts *opts) {
       break;
     case 'h':
       return OPT_NEED_HELP;
+    case 'v':
+      return OPT_NEED_VERSION;
     case 'r':
       opts->gen_flags = FL_HUMAN_READABLE;
       break;
@@ -140,21 +145,25 @@ int main(int argc, char *argv[]) {
   if (rc == OPT_NEED_HELP) {
     show_usage();
     return EXIT_SUCCESS;
+  } else if (rc == OPT_NEED_VERSION) {
+    printf("passwdgen v%d.%d.%d\n", PASSWDGEN_VERSION_MAJOR,
+           PASSWDGEN_VERSION_MINOR, PASSWDGEN_VERSION_PATCH);
+    return EXIT_SUCCESS;
   } else if (rc == OPT_ERR) {
     show_usage();
     return EXIT_FAILURE;
   }
   if (opts.flags & FL_USER_SEED) {
     pcg32_srandom(opts.seed0, opts.seed1);
-    if(!(opts.flags & FL_WITHOUT_HEADER)) {
+    if (!(opts.flags & FL_WITHOUT_HEADER)) {
       printf("seed0=%llu, seed1=%llu, ", opts.seed0, opts.seed1);
     }
   } else {
     init_seed();
   }
-  if(!(opts.flags & FL_WITHOUT_HEADER)) {
+  if (!(opts.flags & FL_WITHOUT_HEADER)) {
     printf("count=%d, len=%d, alphabet=%s\n", opts.count, opts.len,
-          opts.alphabet);
+           opts.alphabet);
   }
   int i;
   for (i = 0; i < opts.count; i++) {
