@@ -31,5 +31,5 @@ libpcg_random.a:
 
 clean:
 	cd ./pcg && $(MAKE) clean
-	rm -rf *.o $(TARGET) version.h
+	rm -rf *.o $(TARGET)
 
