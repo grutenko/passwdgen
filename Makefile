@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -Ipcg/include
+CFLAGS = -O3 -std=c99 -Ipcg/include
 TARGET = passwdgen
 
 PREFIX=/usr/local/bin
@@ -10,10 +10,10 @@ VERSION_MAJOR := $(shell echo $(TAG) | sed -rn 's/v([0-9]+).([0-9]+)/\1/p')
 VERSION_MINOR := $(shell echo $(TAG) | sed -rn 's/v([0-9]+).([0-9]+)/\2/p')
 VERSION_PATCH := 0
 
-.PHONY: all
+.PHONY: all release
 
-all: libpcg_random.a version.h
-	$(CC) $(CFLAGS) -Lpcg/src -lpcg_random -o $(TARGET) passwdgen.c
+all:
+	$(CC) $(CFLAGS) -o $(TARGET) passwdgen.c
 
 .PHONY:install
 

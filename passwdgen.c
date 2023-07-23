@@ -1,4 +1,3 @@
-#include "pcg_variants.h"
 #include "version.h"
 #include <fcntl.h>
 #include <getopt.h>
@@ -14,10 +13,6 @@ static void show_usage() {
          "-l, --len=<number>\tLength of password\n"
          "-c, --count=<number>\tCount of variants\n"
          "-a, --alphabet=<chars>\tAlphabet for generated password\n"
-         "-r, --human-readable \tPrint password in human readable format.\n"
-         "--seed0=<number>,\n"
-         "--seed1=<number> \tUse this number as seed of generator.\n"
-         "--without-header \tDont print header info.\n"
          "-h, --help\tShow help\n"
          "-v, --version\tShow version\n",
          PASSWDGEN_VERSION_MAJOR, PASSWDGEN_VERSION_MINOR,
@@ -26,35 +21,73 @@ static void show_usage() {
 
 #define FL_HUMAN_READABLE 0b0001
 
-void passwdgen(int len, const char *alphabet, int flags) {
+static int read_entropy(void *data, size_t size) {
+  int rc;
+#ifdef __MINGW32__
+  HCRYPTPROV hCryptProv = NULL;
+  LPCTSTR pszContainerName = TEXT("Entropy Container");
+  rc = CryptAcquireContext(&hCryptProv, pszContainerName, NULL, PROV_RSA_FULL,
+                           0);
+  if (!rc && GetLastError() != NTE_BAD_KEYSET)
+    return -1;
+  rc = CryptAcquireContext(&hCryptProv, pszContainerName, NULL, PROV_RSA_FULL,
+                           CRYPT_NEWKEYSET);
+  if (!rc)
+    return -1;
+  rc = CryptGenRandom(hCryptProv, size, data);
+  if (!rc) {
+    CryptReleaseContext(hCryptProv, 0);
+    return -1;
+  }
+#else
+  int fd = open("/dev/random", O_RDONLY);
+  if (fd < 0) {
+    fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0)
+      return -1;
+  }
+
+  rc = read(fd, data, size);
+  if (rc < 0) {
+    close(fd);
+    return -1;
+  }
+  close(fd);
+#endif
+  return 0;
+}
+
+static int brandint(uint32_t b, uint32_t *v) {
+  int rc;
+  uint32_t buf;
+  rc = read_entropy(&buf, sizeof(uint32_t));
+  if (rc < 0) {
+    return -1;
+  }
+  const uint32_t t = -b % b;
+  for (;;) {
+    rc = read_entropy(&buf, sizeof(uint32_t));
+    if (rc < 0)
+      return -1;
+    if (buf >= t) {
+      *v = buf % b;
+      return 0;
+    }
+  }
+}
+
+static int passwdgen(int len, const char *alphabet) {
   int strlen = strnlen(alphabet, 255);
   int i;
-  int index = 0;
+  uint32_t index;
+  int rc;
   for (i = 0; i < len; i++) {
-    index = pcg32_boundedrand(strlen);
-    if (flags & FL_HUMAN_READABLE && i > 0 && i % 4 == 0) {
-      putc('-', stdout);
-    }
+    rc = brandint(strlen, &index);
+    if (rc < 0)
+      return -1;
     putc(alphabet[index], stdout);
   }
   putc('\n', stdout);
-}
-
-int init_seed() {
-  int rc;
-  int fd;
-  int64_t seed[2];
-  fd = open("/dev/random", O_RDONLY);
-  if (fd < 0) {
-    fd = open("/dev/urandom", O_RDONLY);
-    if (fd < 0) {
-      perror("Open /dev/random error: ");
-      return -1;
-    }
-  }
-  rc = read(fd, (void *)seed, sizeof(seed));
-  close(fd);
-  pcg32_srandom(seed[0], seed[1]);
   return 0;
 }
 
@@ -64,9 +97,6 @@ static struct option long_options[] = {{"len", 1, 0, 'l'},
                                        {"human-readable", 0, 0, 'r'},
                                        {"help", 0, 0, 'h'},
                                        {"version", 0, 0, 'v'},
-                                       {"seed0", 1, 0, '0'},
-                                       {"seed1", 1, 0, '1'},
-                                       {"without-header", 0, 0, 'w'},
                                        {0, 0, 0, 0}};
 
 #define DEFAULT_LEN 8
@@ -82,9 +112,6 @@ struct opts {
   int count;
   char alphabet[256];
   int gen_flags;
-  int flags;
-  int64_t seed0;
-  int64_t seed1;
 };
 
 #define OPT_NEED_HELP 1
@@ -98,10 +125,9 @@ int init_opts(int argc, char **argv, struct opts *opts) {
   opts->len = DEFAULT_LEN;
   opts->count = DEFAULT_COUNT;
   opts->gen_flags = 0;
-  opts->flags = 0;
   strcpy(opts->alphabet, DEFAULT_ALPHABET);
   while (1) {
-    rc = getopt_long(argc, argv, "l:c:a:hv0:1:w", long_options, &opt_index);
+    rc = getopt_long(argc, argv, "l:c:a:hv", long_options, &opt_index);
     if (rc < 0)
       return 0;
     switch (rc) {
@@ -120,17 +146,6 @@ int init_opts(int argc, char **argv, struct opts *opts) {
       return OPT_NEED_VERSION;
     case 'r':
       opts->gen_flags = FL_HUMAN_READABLE;
-      break;
-    case '0':
-      opts->seed0 = atoll(optarg);
-      opts->flags = FL_USER_SEED;
-      break;
-    case '1':
-      opts->seed1 = atoll(optarg);
-      opts->flags = FL_USER_SEED;
-      break;
-    case 'w':
-      opts->flags |= FL_WITHOUT_HEADER;
       break;
     case '?':
       return OPT_ERR;
@@ -153,21 +168,12 @@ int main(int argc, char *argv[]) {
     show_usage();
     return EXIT_FAILURE;
   }
-  if (opts.flags & FL_USER_SEED) {
-    pcg32_srandom(opts.seed0, opts.seed1);
-    if (!(opts.flags & FL_WITHOUT_HEADER)) {
-      printf("seed0=%llu, seed1=%llu, ", opts.seed0, opts.seed1);
-    }
-  } else {
-    init_seed();
-  }
-  if (!(opts.flags & FL_WITHOUT_HEADER)) {
-    printf("count=%d, len=%d, alphabet=%s\n", opts.count, opts.len,
-           opts.alphabet);
-  }
   int i;
   for (i = 0; i < opts.count; i++) {
-    passwdgen(opts.len, opts.alphabet, opts.gen_flags);
+    if(passwdgen(opts.len, opts.alphabet) < 0) {
+      perror("IO Error:");
+      return EXIT_FAILURE;
+    }
   }
   return EXIT_SUCCESS;
 }
